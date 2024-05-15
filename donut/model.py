@@ -17,7 +17,6 @@ from PIL import Image, ImageOps
 from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 from timm.models.swin_transformer import SwinTransformer
 from torchvision import transforms
-from torchvision.transforms.functional import resize, rotate
 from transformers import MBartConfig, MBartForCausalLM, XLMRobertaTokenizer
 from transformers.file_utils import ModelOutput
 from transformers.utils.generic import to_py_obj
@@ -46,12 +45,14 @@ class SwinEncoder(nn.Module):
         window_size: int,
         encoder_layer: Tuple[int],
         name_or_path: Union[str, bytes, os.PathLike] = None,
+        drop_rate: float | None = 0.0,
     ):
         super().__init__()
         self.input_size = input_size
         self.align_long_axis = align_long_axis
         self.window_size = window_size
         self.encoder_layer = encoder_layer
+        self.drop_rate = drop_rate
 
         self.to_tensor = transforms.Compose(
             [
@@ -97,9 +98,8 @@ class SwinEncoder(nn.Module):
             x: (batch_size, num_channels, height, width)
         """
         x = self.model.patch_embed(x)
-        # x = self.model.pos_drop(x)
+        x = nn.Dropout(p=self.drop_rate)(x)
         x = self.model.layers(x)
-        # x = self.model.norm(x)
         return x
 
     def prepare_input(self, img: Image.Image, random_padding: bool = False) -> torch.Tensor:
@@ -114,8 +114,8 @@ class SwinEncoder(nn.Module):
             (self.input_size[0] > self.input_size[1] and img.width > img.height)
             or (self.input_size[0] < self.input_size[1] and img.width < img.height)
         ):
-            img = rotate(img, angle=-90, expand=True)
-        img = resize(img, min(self.input_size))
+            img = img.rotate(angle=-90, expand=True)
+        img = img.resize(self.input_size)
         img.thumbnail((self.input_size[1], self.input_size[0]))
         delta_width = self.input_size[1] - img.width
         delta_height = self.input_size[0] - img.height
@@ -150,13 +150,12 @@ class BARTCustomTokenizer(XLMRobertaTokenizer):
         skip_special_tokens: bool = False,
         clean_up_tokenization_spaces: bool = True,
         **kwargs
-    ) -> List[tuple]:
+    ) -> List[Tuple]:
         """
         Convert a list of lists of token ids into a list of strings by calling decode.
         Args:
             sequences (`Union[List[int], List[List[int]], np.ndarray, torch.Tensor, tf.Tensor]`):
                 List of tokenized input ids. Can be obtained using the `__call__` method.
-
             skip_special_tokens (`bool`, *optional*, defaults to `False`):
                 Whether to remove special tokens in the decoding.
             clean_up_tokenization_spaces (`bool`, *optional*, defaults to `True`):
@@ -169,16 +168,16 @@ class BARTCustomTokenizer(XLMRobertaTokenizer):
         confidences = kwargs.pop("confidences", [])
         self.DELIM = kwargs.pop("decoder_delim", None)
 
-        return [
-            self.decode(
+        result = []
+        for seq, conf in zip(sequences, confidences):
+            kwargs["token_confs"] = conf
+            result.append(self.decode(
                 seq,
-                token_confs=conf,
                 skip_special_tokens=skip_special_tokens,
                 clean_up_tokenization_spaces=clean_up_tokenization_spaces,
                 **kwargs,
-            )
-            for seq, conf in zip(sequences, confidences)
-        ]
+            ))
+        return result
 
     def decode(
         self,
@@ -186,7 +185,7 @@ class BARTCustomTokenizer(XLMRobertaTokenizer):
         skip_special_tokens: bool = False,
         clean_up_tokenization_spaces: bool = True,
         **kwargs
-    ) -> tuple:
+    ) -> Tuple:
         """
         Converts a sequence of ids in a string, using the tokenizer and vocabulary with options to remove special
         tokens and clean up tokenization spaces.
@@ -203,14 +202,12 @@ class BARTCustomTokenizer(XLMRobertaTokenizer):
         Returns:
             `str`: The decoded sentence.
         """
-        token_confs = kwargs.pop("token_confs", None)
         # Convert inputs to python lists
         token_ids = to_py_obj(token_ids)
-        token_confs = to_py_obj(token_confs)
+        kwargs["token_confs"] = to_py_obj(kwargs.pop("token_confs", []))
 
         return self._decode(
             token_ids=token_ids,
-            token_confs=token_confs,
             skip_special_tokens=skip_special_tokens,
             clean_up_tokenization_spaces=clean_up_tokenization_spaces,
             **kwargs,
@@ -223,7 +220,7 @@ class BARTCustomTokenizer(XLMRobertaTokenizer):
         clean_up_tokenization_spaces: bool = True,
         spaces_between_special_tokens: bool = True,
         **kwargs
-    ) -> tuple:
+    ) -> Tuple:
         token_confs = kwargs.pop("token_confs", [])
 
         self._decode_use_source_tokenizer = kwargs.pop("use_source_tokenizer", False)
@@ -513,10 +510,10 @@ class DonutConfig(PretrainedConfig):
         **kwargs,
     ):
         super().__init__()
-        self.input_size = input_size or (2560, 1920)
+        self.input_size = input_size if input_size else (2560, 1920)
         self.align_long_axis = align_long_axis
         self.window_size = window_size
-        self.encoder_layer = encoder_layer or (2, 2, 14, 2)
+        self.encoder_layer = encoder_layer if encoder_layer else (2, 2, 14, 2)
         self.decoder_layer = decoder_layer
         self.max_position_embeddings = max_length if max_position_embeddings is None else max_position_embeddings
         self.max_length = max_length
@@ -579,11 +576,11 @@ class DonutModel(PreTrainedModel):
         return_json: bool = True,
         return_confs: bool = True,
         return_tokens: bool = False,
-        return_attentions: bool = False,
+        return_attentions: bool = False
     ):
         """
-        Generate a token sequence in an auto-regressive manner,
-        the generated token sequence is convereted into an ordered JSON format
+        Generate a token sequence in an autoregressive manner,
+        the generated token sequence is converted into an ordered JSON format
 
         Args:
             image: input document image (PIL.Image)
@@ -671,14 +668,13 @@ class DonutModel(PreTrainedModel):
                     idxs.pop(i)
                     break
             seq = re.sub(r"<.*?>", "", seq, count=1).strip(self.DELIM)  # remove first task start token
+            item = seq
             if confs and idxs and return_json:
-                if return_confs or return_tokens:
-                    output["predictions"].append(self.token2json_with_confs(seq, confs, idxs, delim=self.DELIM))
-                else:
-                    seq = seq.replace(self.DELIM, ' ')
-                    output["predictions"].append(self.token2json(seq))
-            else:
-                output["predictions"].append(seq)
+                item = self.token2json_with_confs(seq, confs, idxs, delim=self.DELIM) if (
+                    return_confs or return_tokens
+                ) else self.token2json(seq.replace(self.DELIM, ' '))
+
+            output["predictions"].append(item)
 
         if return_attentions:
             output["attentions"] = {
@@ -704,11 +700,12 @@ class DonutModel(PreTrainedModel):
                 if update_special_tokens_for_json_key:
                     self.decoder.add_special_tokens([fr"<s_{k}>", fr"</s_{k}>"])
                 output += (
-                        fr"<s_{k}>"
-                        + self.json2token(obj[k], update_special_tokens_for_json_key, sort_json_key)
-                        + fr"</s_{k}>"
+                    fr"<s_{k}>"
+                    + self.json2token(obj[k], update_special_tokens_for_json_key, sort_json_key)
+                    + fr"</s_{k}>"
                 )
             return output
+
         if isinstance(obj, list):
             return r"<sep/>".join(
                 [self.json2token(item, update_special_tokens_for_json_key, sort_json_key) for item in obj]
@@ -719,9 +716,9 @@ class DonutModel(PreTrainedModel):
             obj = f"<{obj}/>"  # for categorical special tokens
         return obj
 
-    def token2json(self, tokens, is_inner_value: bool = False) -> List[dict]:
+    def token2json(self, tokens: str, is_inner_value: bool = False) -> List[dict]:
         """
-        Convert a (generated) token seuqnce into an ordered JSON format
+        Convert a (generated) token sequence into an ordered JSON format
         """
         output = dict()
 
@@ -752,9 +749,9 @@ class DonutModel(PreTrainedModel):
                         for leaf in content.split(r"<sep/>"):
                             leaf = leaf.strip()
                             if (
-                                    leaf in self.decoder.tokenizer.get_added_vocab()
-                                    and leaf[0] == "<"
-                                    and leaf[-2:] == "/>"
+                                leaf in self.decoder.tokenizer.get_added_vocab()
+                                and leaf[0] == "<"
+                                and leaf[-2:] == "/>"
                             ):
                                 leaf = leaf[1:-2]  # for categorical special tokens
                             output[key].append(leaf)
@@ -767,8 +764,8 @@ class DonutModel(PreTrainedModel):
 
         if len(output):
             return [output] if is_inner_value else output
-        else:
-            return [] if is_inner_value else {"text_sequence": tokens}
+
+        return [] if is_inner_value else {"text_sequence": tokens}
 
     def token2json_with_confs(
         self, tokens: str, confs: List[float], idxs: List[list], delim: str, is_inner_val: bool = False
@@ -793,9 +790,7 @@ class DonutModel(PreTrainedModel):
                 confs = [
                     confs[i] for i, tkn in enumerate(tokens_split) if not re.search(start_token, tkn, re.IGNORECASE)
                 ]
-                idxs = [
-                    idxs[i] for i, tkn in enumerate(tokens_split) if not re.search(start_token, tkn, re.IGNORECASE)
-                ]
+                idxs = [idxs[i] for i, tkn in enumerate(tokens_split) if not re.search(start_token, tkn, re.IGNORECASE)]
                 tokens = tokens.replace(start_token, "")
                 tksplit = [tk for tk in tokens.split(delim) if tk]
                 assert len(tksplit) == len(confs) == len(idxs)
@@ -867,6 +862,7 @@ class DonutModel(PreTrainedModel):
                     return [output] + self.token2json_with_confs(
                         tokens[6:], confs[1:], idxs[1:], delim, is_inner_val=True
                     )
+
         if len(output):
             return [output] if is_inner_val else output
 
@@ -888,7 +884,7 @@ class DonutModel(PreTrainedModel):
                 e.g., `naver-clova-ix/donut-base`, or `naver-clova-ix/donut-base-finetuned-rvlcdip`
         """
         model = super(DonutModel, cls).from_pretrained(
-            pretrained_model_name_or_path, revision="official", *model_args,  **kwargs
+            pretrained_model_name_or_path, revision="official", *model_args, **kwargs
         )
 
         # truncate or interpolate position embeddings of donut decoder
@@ -898,8 +894,7 @@ class DonutModel(PreTrainedModel):
             # https://github.com/huggingface/transformers/blob/v4.11.3/src/transformers/models/mbart/modeling_mbart.py#L118-L119
             model.decoder.model.model.decoder.embed_positions.weight = torch.nn.Parameter(
                 model.decoder.resize_bart_abs_pos_emb(
-                    model.decoder.model.model.decoder.embed_positions.weight,
-                    max_length + 2,
+                    model.decoder.model.model.decoder.embed_positions.weight, max_length + 2
                 )
             )
             model.config.max_position_embeddings = max_length
