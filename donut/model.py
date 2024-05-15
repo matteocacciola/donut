@@ -78,8 +78,8 @@ class SwinEncoder(nn.Module):
                 if x.endswith("relative_position_index") or x.endswith("attn_mask"):
                     pass
                 elif (
-                        x.endswith("relative_position_bias_table")
-                        and self.model.layers[0].blocks[0].attn.window_size[0] != 12
+                    x.endswith("relative_position_bias_table")
+                    and self.model.layers[0].blocks[0].attn.window_size[0] != 12
                 ):
                     pos_bias = swin_state_dict[x].unsqueeze(0)[0]
                     old_len = int(math.sqrt(len(pos_bias)))
@@ -145,11 +145,11 @@ class BARTCustomTokenizer(XLMRobertaTokenizer):
         self.DELIM = None
 
     def batch_decode(
-            self,
-            sequences: Union[List[int], List[List[int]], "np.ndarray", "torch.Tensor"],
-            skip_special_tokens: bool = False,
-            clean_up_tokenization_spaces: bool = True,
-            **kwargs
+        self,
+        sequences: Union[List[int], List[List[int]], "np.ndarray", "torch.Tensor"],
+        skip_special_tokens: bool = False,
+        clean_up_tokenization_spaces: bool = True,
+        **kwargs
     ) -> List[tuple]:
         """
         Convert a list of lists of token ids into a list of strings by calling decode.
@@ -654,14 +654,16 @@ class DonutModel(PreTrainedModel):
         self.DELIM = "}~}~}~{"  # important, use a DELIM that has a very low prob of appearing in text
 
         for idx, (seq, confs, idxs) in enumerate(self.decoder.tokenizer.batch_decode(
-                decoder_output.sequences, confidences=decoder_output_confs, decoder_delim=self.DELIM)
+            decoder_output.sequences, confidences=decoder_output_confs, decoder_delim=self.DELIM)
         ):
             eos_tkn, pad_tkn = self.decoder.tokenizer.eos_token, self.decoder.tokenizer.pad_token
             split_seq = [tkn for tkn in seq.split(self.DELIM) if tkn]
-            confs = [confs[i] for i, tkn in enumerate(split_seq)
-                     if not (tkn.strip().lower() == eos_tkn.lower() or tkn.strip().lower() == pad_tkn.lower())]
-            idxs = [idxs[i] for i, tkn in enumerate(seq.split(self.DELIM))
-                    if not (tkn.strip().lower() == eos_tkn.lower() or tkn.strip().lower() == pad_tkn.lower())]
+            confs = [confs[i] for i, tkn in enumerate(split_seq) if not (
+                tkn.strip().lower() == eos_tkn.lower() or tkn.strip().lower() == pad_tkn.lower()
+            )]
+            idxs = [idxs[i] for i, tkn in enumerate(seq.split(self.DELIM)) if not (
+                tkn.strip().lower() == eos_tkn.lower() or tkn.strip().lower() == pad_tkn.lower()
+            )]
             seq = seq.replace(eos_tkn, "").replace(pad_tkn, "")
             for i, tkn in enumerate(seq.split(self.DELIM)):
                 if re.search(r"<.*?>", tkn, re.IGNORECASE):  # remove first task start token conf
@@ -814,8 +816,8 @@ class DonutModel(PreTrainedModel):
                             end_tkn_esc_idx = i
                             break
                     content = content.group(1).strip(delim)
-                    content_confs = confs[start_tkn_esc_idx + 1: end_tkn_esc_idx]
-                    content_idxs = idxs[start_tkn_esc_idx + 1: end_tkn_esc_idx]
+                    content_confs = confs[start_tkn_esc_idx + 1:end_tkn_esc_idx]
+                    content_idxs = idxs[start_tkn_esc_idx + 1:end_tkn_esc_idx]
                     cntsplit = [tk for tk in content.split(delim) if tk]
 
                     assert len(tokens_split) == len(confs) == len(idxs)
@@ -839,9 +841,9 @@ class DonutModel(PreTrainedModel):
                         for leaf_i, leaf in enumerate(content.split(r"<sep/>")):
                             leaf = leaf.strip(delim)
                             if (
-                                    leaf in self.decoder.tokenizer.get_added_vocab()
-                                    and leaf[0] == "<"
-                                    and leaf[-2:] == "/>"
+                                leaf in self.decoder.tokenizer.get_added_vocab()
+                                and leaf[0] == "<"
+                                and leaf[-2:] == "/>"
                             ):
                                 leaf = leaf[1:-2]  # for categorical special tokens
                             if leaf:
