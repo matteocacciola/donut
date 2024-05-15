@@ -45,12 +45,14 @@ class SwinEncoder(nn.Module):
         window_size: int,
         encoder_layer: Tuple[int],
         name_or_path: Union[str, bytes, os.PathLike] = None,
+        drop_rate: float | None = 0.0,
     ):
         super().__init__()
         self.input_size = input_size
         self.align_long_axis = align_long_axis
         self.window_size = window_size
         self.encoder_layer = encoder_layer
+        self.drop_rate = drop_rate
 
         self.to_tensor = transforms.Compose(
             [
@@ -96,7 +98,7 @@ class SwinEncoder(nn.Module):
             x: (batch_size, num_channels, height, width)
         """
         x = self.model.patch_embed(x)
-        x = self.model.pos_drop(x)
+        x = nn.Dropout(p=self.drop_rate)(x)
         x = self.model.layers(x)
         return x
 
