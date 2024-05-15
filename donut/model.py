@@ -149,7 +149,7 @@ class BARTCustomTokenizer(XLMRobertaTokenizer):
         skip_special_tokens: bool = False,
         clean_up_tokenization_spaces: bool = True,
         **kwargs
-    ) -> List[str]:
+    ) -> List[Tuple]:
         """
         Convert a list of lists of token ids into a list of strings by calling decode.
         Args:
@@ -184,7 +184,7 @@ class BARTCustomTokenizer(XLMRobertaTokenizer):
         skip_special_tokens: bool = False,
         clean_up_tokenization_spaces: bool = True,
         **kwargs
-    ) -> str:
+    ) -> Tuple:
         """
         Converts a sequence of ids in a string, using the tokenizer and vocabulary with options to remove special
         tokens and clean up tokenization spaces.
@@ -219,7 +219,7 @@ class BARTCustomTokenizer(XLMRobertaTokenizer):
         clean_up_tokenization_spaces: bool = True,
         spaces_between_special_tokens: bool = True,
         **kwargs
-    ) -> str:
+    ) -> Tuple:
         token_confs = kwargs.pop("token_confs", [])
 
         self._decode_use_source_tokenizer = kwargs.pop("use_source_tokenizer", False)
@@ -344,10 +344,20 @@ class BARTDecoder(nn.Module):
         if newly_added_num > 0:
             self.model.resize_token_embeddings(len(self.tokenizer))
 
-    def prepare_inputs_for_inference(self, input_ids: torch.Tensor, past=None, use_cache: bool = None, encoder_outputs: torch.Tensor = None):
+    def prepare_inputs_for_inference(
+        self,
+        input_ids: torch.Tensor,
+        encoder_outputs: torch.Tensor = None,
+        past=None,
+        use_cache: bool = None,
+        **kwargs,
+    ):
         """
         Args:
-            input_ids: (batch_size, sequence_lenth)
+            input_ids: (batch_size, sequence_length)
+            encoder_outputs: (batch_size, sequence_length, hidden_size)
+            past: Past key values
+            use_cache: Whether to use cache or not
         Returns:
             input_ids: (batch_size, sequence_length)
             attention_mask: (batch_size, sequence_length)
@@ -361,7 +371,7 @@ class BARTDecoder(nn.Module):
             "attention_mask": attention_mask,
             "past_key_values": past,
             "use_cache": use_cache,
-            "encoder_hidden_states": encoder_outputs.last_hidden_state,
+            "encoder_hidden_states": encoder_outputs.last_hidden_state if encoder_outputs is not None else None,
         }
         return output
 
@@ -387,7 +397,12 @@ class BARTDecoder(nn.Module):
             input_ids: (batch_size, sequence_length)
             attention_mask: (batch_size, sequence_length)
             encoder_hidden_states: (batch_size, sequence_length, hidden_size)
-
+            past_key_values:
+            labels: (batch_size, sequence_length)
+            use_cache: Whether to use cache or not
+            output_attentions: Whether to return attentions or not
+            output_hidden_states: Whether to return hidden states or not
+            return_dict: Whether to return dict or not
         Returns:
             loss: (1, )
             logits: (batch_size, sequence_length, hidden_dim)
@@ -483,10 +498,10 @@ class DonutConfig(PretrainedConfig):
 
     def __init__(
         self,
-        input_size: Tuple[int, int] = (2560, 1920),
+        input_size: Tuple[int, int] | None = None,
         align_long_axis: bool = False,
         window_size: int = 10,
-        encoder_layer: Tuple[int] = (2, 2, 14, 2),
+        encoder_layer: Tuple[int] | None = None,
         decoder_layer: int = 4,
         max_position_embeddings: int = None,
         max_length: int = 1536,
@@ -494,10 +509,10 @@ class DonutConfig(PretrainedConfig):
         **kwargs,
     ):
         super().__init__()
-        self.input_size = input_size
+        self.input_size = input_size if input_size else (2560, 1920)
         self.align_long_axis = align_long_axis
         self.window_size = window_size
-        self.encoder_layer = encoder_layer
+        self.encoder_layer = encoder_layer if encoder_layer else (2, 2, 14, 2)
         self.decoder_layer = decoder_layer
         self.max_position_embeddings = max_length if max_position_embeddings is None else max_position_embeddings
         self.max_length = max_length
@@ -566,8 +581,8 @@ class DonutModel(PreTrainedModel):
         nested_dict_set: set = {"terms", "total", "shipto", "customer", "vendor", "invoice"}
     ):
         """
-        Generate a token sequence in an auto-regressive manner,
-        the generated token sequence is convereted into an ordered JSON format
+        Generate a token sequence in an autoregressive manner,
+        the generated token sequence is converted into an ordered JSON format
 
         Args:
             image: input document image (PIL.Image)
@@ -576,6 +591,10 @@ class DonutModel(PreTrainedModel):
                 convert prompt to tensor if image_tensor is not fed
             prompt_tensors: (1, sequence_length)
                 convert image to tensor if prompt_tensor is not fed
+            return_json: whether to return a JSON format or not
+            return_confs: whether to return confidence scores or not
+            return_tokens: whether to return tokens or not
+            return_attentions: whether to return attentions or not
             nested_list_set: Fields that are nested lists of dicts
             nested_dict_set: Fields that are nested dicts
         """
@@ -716,10 +735,9 @@ class DonutModel(PreTrainedModel):
                 return obj["text_sequence"]
 
             output = ""
+            keys = obj.keys()
             if sort_json_key:
-                keys = sorted(obj.keys(), reverse=True)
-            else:
-                keys = obj.keys()
+                keys = sorted(keys, reverse=True)
             for k in keys:
                 if update_special_tokens_for_json_key:
                     self.decoder.add_special_tokens([fr"<s_{k}>", fr"</s_{k}>"])
@@ -793,7 +811,7 @@ class DonutModel(PreTrainedModel):
 
     def token2json_with_confs(
         self, tokens: str, confs: List[float], idxs: List[list], delim: str, is_inner_val: bool = False
-    ) -> List[str]:
+    ) -> List:
         """
         Convert a (generated) token sequence into an ordered JSON format
         """
@@ -810,7 +828,7 @@ class DonutModel(PreTrainedModel):
             assert len(tokens_split) == len(confs) == len(idxs)
 
             if end_token is None:
-                # remove all occurences of start_token idxes from confs list and idxs list
+                # remove all occurrences of start_token idxes from confs list and idxs list
                 confs = [
                     confs[i] for i, tkn in enumerate(tokens_split) if not re.search(start_token, tkn, re.IGNORECASE)
                 ]
@@ -836,18 +854,19 @@ class DonutModel(PreTrainedModel):
                             break
                     content = content.group(1).strip(delim)
                     tksplit = [tk for tk in tokens.split(delim) if tk]
-                    content_confs = confs[start_tkn_esc_idx + 1: end_tkn_esc_idx]
-                    content_idxs = idxs[start_tkn_esc_idx + 1: end_tkn_esc_idx]
+                    content_confs = confs[start_tkn_esc_idx + 1:end_tkn_esc_idx]
+                    content_idxs = idxs[start_tkn_esc_idx + 1:end_tkn_esc_idx]
                     cntsplit = [tk for tk in content.split(delim) if tk]
 
                     assert len(tokens_split) == len(confs) == len(idxs)
                     assert len(cntsplit) == len(content_confs) == len(content_idxs)
 
                     if r"<s_" in content and r"</s_" in content:  # non-leaf node
-                        value = self.token2json_with_confs(content, content_confs, content_idxs, delim, is_inner_val=True)
+                        value = self.token2json_with_confs(
+                            content, content_confs, content_idxs, delim, is_inner_val=True
+                        )
                         if value:
-                            if len(value) == 1:
-                                value = value[0]
+                            value = value[0] if len(value) == 1 else value
                             output[key] = value
                     else:  # leaf nodes
                         output[key] = []
@@ -907,13 +926,14 @@ class DonutModel(PreTrainedModel):
                 Name of a pretrained model name either registered in huggingface.co. or saved in local,
                 e.g., `naver-clova-ix/donut-base`, or `naver-clova-ix/donut-base-finetuned-rvlcdip`
         """
-        model = super(DonutModel, cls).from_pretrained(pretrained_model_name_or_path, revision="official", *model_args, **kwargs)
+        model = super(DonutModel, cls).from_pretrained(
+            pretrained_model_name_or_path, revision="official", *model_args, **kwargs
+        )
 
-        # truncate or interplolate position embeddings of donut decoder
+        # truncate or interpolate position embeddings of donut decoder
         max_length = kwargs.get("max_length", model.config.max_position_embeddings)
-        if (
-            max_length != model.config.max_position_embeddings
-        ):  # if max_length of trained model differs max_length you want to train
+        # if max_length of trained model differs max_length you want to train
+        if max_length != model.config.max_position_embeddings:
             # https://github.com/huggingface/transformers/blob/v4.11.3/src/transformers/models/mbart/modeling_mbart.py#L118-L119
             model.decoder.model.model.decoder.embed_positions.weight = torch.nn.Parameter(
                 model.decoder.resize_bart_abs_pos_emb(
