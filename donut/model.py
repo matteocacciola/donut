@@ -17,7 +17,6 @@ from PIL import Image, ImageOps
 from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 from timm.models.swin_transformer import SwinTransformer
 from torchvision import transforms
-from torchvision.transforms.functional import resize, rotate
 from transformers import MBartConfig, MBartForCausalLM, XLMRobertaTokenizer
 from transformers.file_utils import ModelOutput
 from transformers.utils.generic import to_py_obj
@@ -113,8 +112,8 @@ class SwinEncoder(nn.Module):
             (self.input_size[0] > self.input_size[1] and img.width > img.height)
             or (self.input_size[0] < self.input_size[1] and img.width < img.height)
         ):
-            img = rotate(img, angle=-90, expand=True)
-        img = resize(img, min(self.input_size))
+            img = img.rotate(angle=-90, expand=True)
+        img = img.resize(min(self.input_size))
         img.thumbnail((self.input_size[1], self.input_size[0]))
         delta_width = self.input_size[1] - img.width
         delta_height = self.input_size[0] - img.height
