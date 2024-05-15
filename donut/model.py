@@ -575,10 +575,7 @@ class DonutModel(PreTrainedModel):
         return_json: bool = True,
         return_confs: bool = True,
         return_tokens: bool = False,
-        return_attentions: bool = False,
-        return_max_bbox: bool = False,
-        nested_list_set: set = {"Items"},
-        nested_dict_set: set = {"terms", "total", "shipto", "customer", "vendor", "invoice"}
+        return_attentions: bool = False
     ):
         """
         Generate a token sequence in an autoregressive manner,
@@ -595,8 +592,6 @@ class DonutModel(PreTrainedModel):
             return_confs: whether to return confidence scores or not
             return_tokens: whether to return tokens or not
             return_attentions: whether to return attentions or not
-            nested_list_set: Fields that are nested lists of dicts
-            nested_dict_set: Fields that are nested dicts
         """
         # prepare backbone inputs (image and prompt)
         if image is None and image_tensors is None:
@@ -686,43 +681,6 @@ class DonutModel(PreTrainedModel):
                 "self_attentions": decoder_output.decoder_attentions,
                 "cross_attentions": decoder_output.cross_attentions,
             }
-        if return_max_bbox and return_confs and return_tokens:
-            preds_with_max_bbox = []
-            for pred_obj in output["predictions"]:
-                temp_pred_obj = {}
-                for top_key, top_val in pred_obj.items():
-                    if top_key in nested_list_set:
-                        temp_pred_obj[top_key] = []
-                        for item in top_val:
-                            temp_item_obj = {}
-                            for item_key, item_val in item.items():
-                                text, conf, tokens = item_val
-                                max_bbox = DonutModel.max_bbox_from_heatmap(
-                                    decoder_cross_attentions=decoder_output.cross_attentions,
-                                    tkn_indexes=tokens, final_h=1280, final_w=960
-                                )
-                                temp_item_obj[item_key] = [text, conf, tokens, max_bbox]
-                            temp_pred_obj[top_key].append(temp_item_obj)
-                    elif top_key in nested_dict_set:
-                        temp_item_obj = {}
-                        for sub_key, sub_val in top_val.items():
-                            text, conf, tokens = sub_val
-                            max_bbox = DonutModel.max_bbox_from_heatmap(
-                                decoder_cross_attentions=decoder_output.cross_attentions,
-                                tkn_indexes=tokens, final_h=1280, final_w=960
-                            )
-                            temp_item_obj[sub_key] = [text, conf, tokens, max_bbox]
-                        temp_pred_obj[top_key] = temp_item_obj
-                    else:
-                        text, conf, tokens = top_val
-                        max_bbox = DonutModel.max_bbox_from_heatmap(
-                            decoder_cross_attentions=decoder_output.cross_attentions,
-                            tkn_indexes=tokens, final_h=1280, final_w=960
-                        )
-                        temp_pred_obj[top_key] = [text, conf, tokens, max_bbox]
-                preds_with_max_bbox.append(temp_pred_obj)
-
-            output["predictions"] = preds_with_max_bbox
 
         return output
 
@@ -853,7 +811,6 @@ class DonutModel(PreTrainedModel):
                             end_tkn_esc_idx = i
                             break
                     content = content.group(1).strip(delim)
-                    tksplit = [tk for tk in tokens.split(delim) if tk]
                     content_confs = confs[start_tkn_esc_idx + 1:end_tkn_esc_idx]
                     content_idxs = idxs[start_tkn_esc_idx + 1:end_tkn_esc_idx]
                     cntsplit = [tk for tk in content.split(delim) if tk]
