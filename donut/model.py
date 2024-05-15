@@ -666,14 +666,13 @@ class DonutModel(PreTrainedModel):
                     idxs.pop(i)
                     break
             seq = re.sub(r"<.*?>", "", seq, count=1).strip(self.DELIM)  # remove first task start token
+            item = seq
             if confs and idxs and return_json:
-                if return_confs or return_tokens:
-                    output["predictions"].append(self.token2json_with_confs(seq, confs, idxs, delim=self.DELIM))
-                else:
-                    seq = seq.replace(self.DELIM, ' ')
-                    output["predictions"].append(self.token2json(seq))
-            else:
-                output["predictions"].append(seq)
+                item = self.token2json_with_confs(seq, confs, idxs, delim=self.DELIM) if (
+                    return_confs or return_tokens
+                ) else self.token2json(seq.replace(self.DELIM, ' '))
+
+            output["predictions"].append(item)
 
         if return_attentions:
             output["attentions"] = {
