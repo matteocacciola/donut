@@ -113,7 +113,7 @@ class SwinEncoder(nn.Module):
             or (self.input_size[0] < self.input_size[1] and img.width < img.height)
         ):
             img = img.rotate(angle=-90, expand=True)
-        img = img.resize(min(self.input_size))
+        img = img.resize(self.input_size)
         img.thumbnail((self.input_size[1], self.input_size[0]))
         delta_width = self.input_size[1] - img.width
         delta_height = self.input_size[0] - img.height
