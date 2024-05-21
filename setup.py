@@ -58,7 +58,6 @@ setup(
         "sentencepiece",
         "zss",
         "sconf>=0.2.3",
-        "opencv-python>=4.6.0.66",
     ],
     classifiers=[
         "Intended Audience :: Developers",
