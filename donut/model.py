@@ -785,6 +785,8 @@ class DonutModel(PreTrainedModel):
             tokens_split = [tkn for tkn in tokens.split(delim) if tkn]
             assert len(tokens_split) == len(confs) == len(idxs)
 
+            print(key, start_token, end_token, tokens_split, confs, idxs, delim)
+
             if end_token is None:
                 # remove all occurrences of start_token idxes from confs list and idxs list
                 confs = [
@@ -834,22 +836,25 @@ class DonutModel(PreTrainedModel):
                             re.search(r"<sep/>", tkn, re.IGNORECASE)
                         )]
                         for leaf_i, leaf in enumerate(content.split(r"<sep/>")):
-                            leaf = leaf.strip(delim)
+                            leaf_stripped = leaf.strip(delim)
                             if (
-                                leaf in self.decoder.tokenizer.get_added_vocab()
-                                and leaf[0] == "<"
-                                and leaf[-2:] == "/>"
+                                leaf_stripped in self.decoder.tokenizer.get_added_vocab()
+                                and leaf_stripped[0] == "<"
+                                and leaf_stripped[-2:] == "/>"
                             ):
-                                leaf = leaf[1:-2]  # for categorical special tokens
-                            if leaf:
-                                if self.return_confs and self.return_tokens:
-                                    output[key].append([leaf, leaf_content_confs[leaf_i], leaf_content_idxs[leaf_i]])
-                                elif self.return_confs:
-                                    output[key].append([leaf, leaf_content_confs[leaf_i]])
-                                elif self.return_tokens:
-                                    output[key].append([leaf, leaf_content_idxs[leaf_i]])
-                                else:
-                                    output[key].append(leaf)
+                                leaf_stripped = leaf_stripped[1:-2]  # for categorical special tokens
+                            if not leaf_stripped:
+                                continue
+                            if self.return_confs and self.return_tokens:
+                                output[key].append(
+                                    [leaf_stripped, leaf_content_confs[leaf_i], leaf_content_idxs[leaf_i]]
+                                )
+                            elif self.return_confs:
+                                output[key].append([leaf_stripped, leaf_content_confs[leaf_i]])
+                            elif self.return_tokens:
+                                output[key].append([leaf_stripped, leaf_content_idxs[leaf_i]])
+                            else:
+                                output[key].append(leaf_stripped)
                         if len(output[key]) == 1:
                             output[key] = output[key][0]
                 for i, tkn in enumerate(tokens_split):
