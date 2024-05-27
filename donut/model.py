@@ -532,7 +532,6 @@ class DonutModel(PreTrainedModel):
 
     def __init__(self, config: DonutConfig):
         super().__init__(config)
-        self.DELIM = None
         self.return_confs = None
         self.return_tokens = None
         self.config = config
@@ -648,31 +647,31 @@ class DonutModel(PreTrainedModel):
         output = {"predictions": list()}
         self.return_tokens = return_tokens
         self.return_confs = return_confs
-        self.DELIM = "}~}~}~{"  # important, use a DELIM that has a very low prob of appearing in text
+        delimiter = "}~}~}~{"  # important, use a delimiter that has a very low prob of appearing in text
 
         for idx, (seq, confs, idxs) in enumerate(self.decoder.tokenizer.batch_decode(
-            decoder_output.sequences, confidences=decoder_output_confs, decoder_delim=self.DELIM)
+            decoder_output.sequences, confidences=decoder_output_confs, decoder_delim=delimiter)
         ):
             eos_tkn, pad_tkn = self.decoder.tokenizer.eos_token, self.decoder.tokenizer.pad_token
-            split_seq = [tkn for tkn in seq.split(self.DELIM) if tkn]
+            split_seq = [tkn for tkn in seq.split(delimiter) if tkn]
             confs = [confs[i] for i, tkn in enumerate(split_seq) if not (
                 tkn.strip().lower() == eos_tkn.lower() or tkn.strip().lower() == pad_tkn.lower()
             )]
-            idxs = [idxs[i] for i, tkn in enumerate(seq.split(self.DELIM)) if not (
+            idxs = [idxs[i] for i, tkn in enumerate(seq.split(delimiter)) if not (
                 tkn.strip().lower() == eos_tkn.lower() or tkn.strip().lower() == pad_tkn.lower()
             )]
             seq = seq.replace(eos_tkn, "").replace(pad_tkn, "")
-            for i, tkn in enumerate(seq.split(self.DELIM)):
+            for i, tkn in enumerate(seq.split(delimiter)):
                 if re.search(r"<.*?>", tkn, re.IGNORECASE):  # remove first task start token conf
                     confs.pop(i)
                     idxs.pop(i)
                     break
-            seq = re.sub(r"<.*?>", "", seq, count=1).strip(self.DELIM)  # remove first task start token
+            seq = re.sub(r"<.*?>", "", seq, count=1).strip(delimiter)  # remove first task start token
             item = seq
             if confs and idxs and return_json:
-                item = self.token2json_with_confs(seq, confs, idxs, delim=self.DELIM) if (
+                item = self.token2json_with_confs(seq, confs, idxs, delim=delimiter) if (
                     return_confs or return_tokens
-                ) else self.token2json(seq.replace(self.DELIM, ' '))
+                ) else self.token2json(seq.replace(delimiter, ' '))
 
             output["predictions"].append(item)
 
@@ -784,8 +783,6 @@ class DonutModel(PreTrainedModel):
             start_token = start_token.group()
             tokens_split = [tkn for tkn in tokens.split(delim) if tkn]
             assert len(tokens_split) == len(confs) == len(idxs)
-
-            print(key, start_token, end_token, tokens_split, confs, idxs, delim)
 
             if end_token is None:
                 # remove all occurrences of start_token idxes from confs list and idxs list

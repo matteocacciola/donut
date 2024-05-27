@@ -93,7 +93,7 @@ class DonutDataset(Dataset):
     def __len__(self) -> int:
         return self.dataset_length
 
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def __getitem__(self, idx: int) -> Tuple:
         """
         Load image from image_path of given dataset_path and convert into input_tensor and labels.
         Convert gt data into input_ids (tokenized string)
