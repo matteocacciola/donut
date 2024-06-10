@@ -83,6 +83,8 @@ def train(config):
     datasets = {"train": [], "validation": []}
     for i, dataset_name_or_path in enumerate(config.dataset_name_or_paths):
         task_name = os.path.basename(dataset_name_or_path)  # e.g., cord-v2, docvqa, rvlcdip, ...
+        task_start_token = config.task_start_tokens[i] if config.get("task_start_tokens", None) else f"<s_{task_name}>"
+        prompt_end_token = f"<s_{task_name}>"
 
         # add categorical special tokens (optional)
         if task_name == "rvlcdip":
@@ -105,10 +107,8 @@ def train(config):
                     donut_model=model_module.model,
                     max_length=config.max_length,
                     split=split,
-                    task_start_token=config.task_start_tokens[i] if config.get(
-                        "task_start_tokens", None
-                    ) else f"<s_{task_name}>",
-                    prompt_end_token="<s_answer>" if "docvqa" in dataset_name_or_path else f"<s_{task_name}>",
+                    task_start_token=task_start_token,
+                    prompt_end_token=prompt_end_token,
                     sort_json_key=config.sort_json_key,
                 )
             )
