@@ -337,11 +337,18 @@ class BARTDecoder(nn.Module):
                     new_bart_state_dict[x] = bart_state_dict[x]
             self.model.load_state_dict(new_bart_state_dict)
 
-    def add_special_tokens(self, list_of_tokens: List[str]):
+    def add_special_tokens(self, list_of_tokens: List[str], replace_additional_special_tokens: bool | None = False):
         """
         Add special tokens to tokenizer and resize the token embeddings
         """
-        newly_added_num = self.tokenizer.add_special_tokens({"additional_special_tokens": sorted(set(list_of_tokens))})
+        newly_added_num = 0
+        set_of_tokens = set(list_of_tokens)
+        set_special_tokens = set(self.tokenizer.all_special_tokens)
+        if len(set_of_tokens - set_special_tokens) > 0:
+            newly_added_num = self.tokenizer.add_special_tokens(
+                {"additional_special_tokens": sorted(set_of_tokens)},
+                replace_additional_special_tokens=replace_additional_special_tokens
+            )
         if newly_added_num > 0:
             self.model.resize_token_embeddings(len(self.tokenizer))
 
